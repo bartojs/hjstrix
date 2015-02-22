@@ -11,7 +11,9 @@
       (swap! commands assoc (str run) {:run run :fallback fallback :timeout timeout :chan ch :poolsize poolsize})
       (go-loop [] 
                (let [args (<! ch)] 
-                    ;; this is where we would run
+                    (try 
+                      (apply run args)
+                      (catch Exception e (if fallback (apply fallback e args) (throw e))))
                     (println "go-loop" (str run) args)) 
                (recur)))))
 
@@ -24,8 +26,9 @@
     (println "ERROR! NO COMMAND" (str func)))) 
 
 (comment
-    (defn myfun [a] (println "myfun" a))    
-    (command myfun nil 0 3)
+    (defn myfun [a] (println "myfun" a))
+    (defn myfall [err & args] (println "myfall" err args))
+    (command myfun myfall 0 3)
     (run myfun "bla") 
     (run myfun "moo") 
   ) 
