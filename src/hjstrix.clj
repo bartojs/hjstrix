@@ -1,5 +1,5 @@
 (ns hjstrix
-  (:require [clojure.core.async :refer [chan go-loop go <! >! timeout alts! close!]]))
+  (:require [clojure.core.async :refer [chan buffer go-loop go <! >! >!! timeout alts! close!]]))
 
 (def commands (atom {}))
 
@@ -7,8 +7,9 @@
   "crate a command called name with the run function, a fallback function and a timeout in ms, with pool size"
   [run fallback timeout poolsize] 
   (when-not (contains? @commands (str run))
-    (let [ch (chan poolsize)]
-      (swap! commands assoc (str run) {:run run :fallback fallback :timeout timeout :chan ch :poolsize poolsize})
+    (let [buf (buffer poolsize)
+          ch (chan buf)]
+      (swap! commands assoc (str run) {:run run :fallback fallback :timeout timeout :chan ch :buffer buf :poolsize poolsize})
       (go-loop [] 
                (let [[outchan args] (<! ch)] 
                     (try 
@@ -23,11 +24,13 @@
 (defn run 
   [func & args]
   (if-let [cmd (get @commands (str func))]
-      (let [ch (chan)]
-       (>!! (:chan cmd) [ch args])
-       (alt!! (timeout (:timeout cmd)) (if-let [fallback (:fallback cmd)] (apply fallback "TIMEOUT" args) (println "ERROR! timeout"))
+      (if (.full? (:buffer cmd))
+       (if-let [fallback (:fallback cmd)] (apply fallback "FULL" args) (println "ERROR! no fallback for full"))
+       (let [ch (chan)]
+        (when () (>!! (:chan cmd) [ch args])
+           (alt!! (timeout (:timeout cmd)) (if-let [fallback (:fallback cmd)] (apply fallback "TIMEOUT" args) (println "ERROR! no fallback for timeout"))
               ch ([result] result))
-          )
+          )))
     (println "ERROR! NO COMMAND" (str func)))) 
 
 (comment
