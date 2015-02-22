@@ -1,43 +1,41 @@
 (ns hjstrix
-  (:require [clojure.core.async :refer [chan buffer go-loop go <! >! >!! timeout alts! close!]]))
+  (:require [clojure.core.async :refer [chan buffer go-loop go <! >! >!! timeout alt!! close!]]))
 
 (def commands (atom {}))
 
-(defn command 
-  "crate a command called name with the run function, a fallback function and a timeout in ms, with pool size"
-  [run fallback timeout poolsize] 
+(defn command
+  "crate a command with the run function, a fallback function, a timeout in ms, with pool size"
+  [run fallback timeout poolsize]
   (when-not (contains? @commands (str run))
     (let [buf (buffer poolsize)
           ch (chan buf)]
       (swap! commands assoc (str run) {:run run :fallback fallback :timeout timeout :chan ch :buffer buf :poolsize poolsize})
-      (go-loop [] 
-               (let [[outchan args] (<! ch)] 
-                    (try 
+      (go-loop []
+               (let [[outchan args] (<! ch)]
+                    (try
                       (prn args)
                       (>! outchan (or (apply run args) ""))
-                      (catch Exception e 
-                        (close! outchan) 
+                      (catch Exception e
+                        (close! outchan)
                         (if fallback (apply fallback e args) (throw e))))
-                    (println "go-loop" (str run) args)) 
+                    (println "go-loop" (str run) args))
                (recur)))))
 
-(defn run 
+(defn run
   [func & args]
   (if-let [cmd (get @commands (str func))]
-      (if (.full? (:buffer cmd))
+    (if (.full? (:buffer cmd))
        (if-let [fallback (:fallback cmd)] (apply fallback "FULL" args) (println "ERROR! no fallback for full"))
        (let [ch (chan)]
-        (when () (>!! (:chan cmd) [ch args])
+        (when (>!! (:chan cmd) [ch args])
            (alt!! (timeout (:timeout cmd)) (if-let [fallback (:fallback cmd)] (apply fallback "TIMEOUT" args) (println "ERROR! no fallback for timeout"))
-              ch ([result] result))
-          )))
-    (println "ERROR! NO COMMAND" (str func)))) 
+              ch ([result] result)))))
+    (println "ERROR! NO COMMAND" (str func))))
 
 (comment
     (defn myfun [a] (println "myfun" a) (Thread/sleep 5000) (println "myfun done"))
     (defn myfall [err & args] (println "myfall" err args))
     (command myfun myfall 3000 3)
-    (run myfun "bla") 
-    (run myfun "moo") 
-  ) 
-
+    (run myfun "bla")
+    (run myfun "moo")
+  )
